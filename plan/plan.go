@@ -118,7 +118,7 @@ func (t planTable) addCandidate(e *endpoint.Endpoint) {
 	if _, ok := t.rows[dnsName][e.SetIdentifier]; !ok {
 		t.rows[dnsName][e.SetIdentifier] = make(map[string]*planTableRow)
 	}
-	if _, ok := t.rows[e.SetIdentifier][e.RecordType]; !ok {
+	if _, ok := t.rows[dnsName][e.SetIdentifier][e.RecordType]; !ok {
 		t.rows[dnsName][e.SetIdentifier][e.RecordType] = &planTableRow{}
 	}
 	t.rows[dnsName][e.SetIdentifier][e.RecordType].candidates = append(t.rows[dnsName][e.SetIdentifier][e.RecordType].candidates, e)
