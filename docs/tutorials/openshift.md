@@ -2,6 +2,47 @@
 This tutorial describes how to configure ExternalDNS to use the OpenShift Route source.
 It is meant to supplement the other provider-specific setup tutorials.
 
+### For OCP 4.x
+
+In OCP 4.x, if you have multiple [OpenShift ingress controllers](https://docs.openshift.com/container-platform/4.9/networking/ingress-operator.html) then you must specify an ingress controller name (also called router name), you can get it from the route's `status.ingress[*].routerName` field.
+If you don't specify a router name when you have multiple ingress controllers in your cluster then the first router from the route's `status.ingress` will be used. Note that the router must have admitted the route in order to be selected.
+Once the router is known, ExternalDNS will use this router's canonical hostname as the target for the CNAME record.
+
+Starting from OCP 4.10 you can use [ExternalDNS Operator](https://github.com/openshift/external-dns-operator) to manage ExternalDNS instances. Example of its custom resource for AWS provider:
+```yaml
+  apiVersion: externaldns.olm.openshift.io/v1alpha1
+  kind: ExternalDNS
+  metadata:
+    name: sample
+  spec:
+    provider:
+      type: AWS
+    source:
+      openshiftRouteOptions:
+        routerName: default
+      type: OpenShiftRoute
+    zones:
+      - Z05387772BD5723IZFRX3
+```
+
+This will create an ExternalDNS POD with the following container args in `external-dns` namespace:
+```
+spec:
+  containers:
+  - args:
+    - --metrics-address=127.0.0.1:7979
+    - --txt-owner-id=external-dns-sample
+    - --provider=aws
+    - --source=openshift-route
+    - --policy=sync
+    - --registry=txt
+    - --log-level=debug
+    - --zone-id-filter=Z05387772BD5723IZFRX3
+    - --openshift-router-name=default
+    - --txt-prefix=external-dns-
+```
+
+### For OCP 3.11 environment
 ### Prepare ROUTER_CANONICAL_HOSTNAME in default/router deployment
 Read and go through [Finding the Host Name of the Router](https://docs.openshift.com/container-platform/3.11/install_config/router/default_haproxy_router.html#finding-router-hostname).
 If no ROUTER_CANONICAL_HOSTNAME is set, you must annotate each route with external-dns.alpha.kubernetes.io/target!

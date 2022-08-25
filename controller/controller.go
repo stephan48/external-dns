@@ -94,6 +94,22 @@ var (
 			Help:      "Number of Source errors.",
 		},
 	)
+	registryARecords = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "external_dns",
+			Subsystem: "registry",
+			Name:      "a_records",
+			Help:      "Number of Registry A records.",
+		},
+	)
+	sourceARecords = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "external_dns",
+			Subsystem: "source",
+			Name:      "a_records",
+			Help:      "Number of Source A records.",
+		},
+	)
 	verifiedARecords = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "external_dns",
@@ -113,6 +129,8 @@ func init() {
 	prometheus.MustRegister(deprecatedRegistryErrors)
 	prometheus.MustRegister(deprecatedSourceErrors)
 	prometheus.MustRegister(controllerNoChangesTotal)
+	prometheus.MustRegister(registryARecords)
+	prometheus.MustRegister(sourceARecords)
 	prometheus.MustRegister(verifiedARecords)
 }
 
@@ -149,8 +167,12 @@ func (c *Controller) RunOnce(ctx context.Context) error {
 		deprecatedRegistryErrors.Inc()
 		return err
 	}
-	registryEndpointsTotal.Set(float64(len(records)))
 
+	missingRecords := c.Registry.MissingRecords()
+
+	registryEndpointsTotal.Set(float64(len(records)))
+	regARecords := filterARecords(records)
+	registryARecords.Set(float64(len(regARecords)))
 	ctx = context.WithValue(ctx, provider.RecordsContextKey, records)
 
 	endpoints, err := c.Source.Endpoints(ctx)
@@ -160,9 +182,34 @@ func (c *Controller) RunOnce(ctx context.Context) error {
 		return err
 	}
 	sourceEndpointsTotal.Set(float64(len(endpoints)))
+	srcARecords := filterARecords(endpoints)
+	sourceARecords.Set(float64(len(srcARecords)))
 	vRecords := fetchMatchingARecords(endpoints, records)
 	verifiedARecords.Set(float64(len(vRecords)))
 	endpoints = c.Registry.AdjustEndpoints(endpoints)
+
+	if len(missingRecords) > 0 {
+		// Add missing records before the actual plan is applied.
+		// This prevents the problems when the missing TXT record needs to be
+		// created and deleted/upserted in the same batch.
+		missingRecordsPlan := &plan.Plan{
+			Policies:           []plan.Policy{c.Policy},
+			Missing:            missingRecords,
+			DomainFilter:       endpoint.MatchAllDomainFilters{c.DomainFilter, c.Registry.GetDomainFilter()},
+			PropertyComparator: c.Registry.PropertyValuesEqual,
+			ManagedRecords:     c.ManagedRecordTypes,
+		}
+		missingRecordsPlan = missingRecordsPlan.Calculate()
+		if missingRecordsPlan.Changes.HasChanges() {
+			err = c.Registry.ApplyChanges(ctx, missingRecordsPlan.Changes)
+			if err != nil {
+				registryErrorsTotal.Inc()
+				deprecatedRegistryErrors.Inc()
+				return err
+			}
+			log.Info("All missing records are created")
+		}
+	}
 
 	plan := &plan.Plan{
 		Policies:           []plan.Policy{c.Policy},
@@ -221,7 +268,11 @@ func filterARecords(endpoints []*endpoint.Endpoint) []string {
 func (c *Controller) ScheduleRunOnce(now time.Time) {
 	c.nextRunAtMux.Lock()
 	defer c.nextRunAtMux.Unlock()
-	c.nextRunAt = now.Add(c.MinEventSyncInterval)
+	// schedule only if a reconciliation is not already planned
+	// to happen in the following c.MinEventSyncInterval
+	if !c.nextRunAt.Before(now.Add(c.MinEventSyncInterval)) {
+		c.nextRunAt = now.Add(c.MinEventSyncInterval)
+	}
 }
 
 func (c *Controller) ShouldRunOnce(now time.Time) bool {
