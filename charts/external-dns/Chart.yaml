@@ -2,12 +2,15 @@ apiVersion: v2
 name: external-dns
 description: ExternalDNS synchronizes exposed Kubernetes Services and Ingresses with DNS providers.
 type: application
-version: 1.2.0
-appVersion: 0.9.0
+version: 1.11.0
+appVersion: 0.12.2
 keywords:
   - kubernetes
+  - externaldns
   - external-dns
   - dns
+  - service
+  - ingress
 home: https://github.com/kubernetes-sigs/external-dns/
 icon: https://github.com/kubernetes-sigs/external-dns/raw/master/img/external-dns.png
 sources:
@@ -18,4 +21,10 @@ maintainers:
 annotations:
   artifacthub.io/changes: |
     - kind: added
-      description: Initial official release.
+      description: "Added support to configure dnsPolicy on the Helm chart deployment."
+    - kind: added
+      description: "Added ability to customise the deployment strategy."
+    - kind: changed
+      description: "Updated ExternalDNS version to v0.12.2."
+    - kind: changed
+      description: "Changed default deployment strategy to Recreate."

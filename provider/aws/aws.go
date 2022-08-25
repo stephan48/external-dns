@@ -119,6 +119,8 @@ var (
 		"elb.af-south-1.amazonaws.com":        "Z203XCE67M25HM",
 		// Global Accelerator
 		"awsglobalaccelerator.com": "Z2BJ6XQ5FK7U4H",
+		// Cloudfront
+		"cloudfront.net": "Z2FDTNDATAQYW2",
 	}
 )
 
@@ -168,6 +170,7 @@ type AWSConfig struct {
 	BatchChangeInterval  time.Duration
 	EvaluateTargetHealth bool
 	AssumeRole           string
+	AssumeRoleExternalID string
 	APIRetries           int
 	PreferCNAME          bool
 	DryRun               bool
@@ -196,8 +199,15 @@ func NewAWSProvider(awsConfig AWSConfig) (*AWSProvider, error) {
 	}
 
 	if awsConfig.AssumeRole != "" {
-		log.Infof("Assuming role: %s", awsConfig.AssumeRole)
-		session.Config.WithCredentials(stscreds.NewCredentials(session, awsConfig.AssumeRole))
+		if awsConfig.AssumeRoleExternalID != "" {
+			log.Infof("Assuming role: %s with external id %s", awsConfig.AssumeRole, awsConfig.AssumeRoleExternalID)
+			session.Config.WithCredentials(stscreds.NewCredentials(session, awsConfig.AssumeRole, func(p *stscreds.AssumeRoleProvider) {
+				p.ExternalID = &awsConfig.AssumeRoleExternalID
+			}))
+		} else {
+			log.Infof("Assuming role: %s", awsConfig.AssumeRole)
+			session.Config.WithCredentials(stscreds.NewCredentials(session, awsConfig.AssumeRole))
+		}
 	}
 
 	provider := &AWSProvider{
@@ -290,10 +300,7 @@ func (p *AWSProvider) Zones(ctx context.Context) (map[string]*route53.HostedZone
 // wildcardUnescape converts \\052.abc back to *.abc
 // Route53 stores wildcards escaped: http://docs.aws.amazon.com/Route53/latest/DeveloperGuide/DomainNameFormat.html?shortFooter=true#domain-name-format-asterisk
 func wildcardUnescape(s string) string {
-	if strings.Contains(s, "\\052") {
-		s = strings.Replace(s, "\\052", "*", 1)
-	}
-	return s
+	return strings.Replace(s, "\\052", "*", 1)
 }
 
 // Records returns the list of records in a given hosted zone.
@@ -311,9 +318,6 @@ func (p *AWSProvider) records(ctx context.Context, zones map[string]*route53.Hos
 	f := func(resp *route53.ListResourceRecordSetsOutput, lastPage bool) (shouldContinue bool) {
 		for _, r := range resp.ResourceRecordSets {
 			newEndpoints := make([]*endpoint.Endpoint, 0)
-
-			// TODO(linki, ownership): Remove once ownership system is in place.
-			// See: https://github.com/kubernetes-sigs/external-dns/pull/122/files/74e2c3d3e237411e619aefc5aab694742001cdec#r109863370
 
 			if !provider.SupportedRecordType(aws.StringValue(r.Type)) {
 				continue
@@ -414,14 +418,9 @@ func (p *AWSProvider) doRecords(ctx context.Context, action string, endpoints []
 		return errors.Wrapf(err, "failed to list zones, aborting %s doRecords action", action)
 	}
 
-	records, err := p.records(ctx, zones)
-	if err != nil {
-		log.Errorf("failed to list records while preparing %s doRecords action: %s", action, err)
-	}
-
 	p.AdjustEndpoints(endpoints)
 
-	return p.submitChanges(ctx, p.newChanges(action, endpoints, records, zones), zones)
+	return p.submitChanges(ctx, p.newChanges(action, endpoints), zones)
 }
 
 // UpdateRecords updates a given set of old records to a new set of records in a given hosted zone.
@@ -431,15 +430,10 @@ func (p *AWSProvider) UpdateRecords(ctx context.Context, updates, current []*end
 		return errors.Wrapf(err, "failed to list zones, aborting UpdateRecords")
 	}
 
-	records, err := p.records(ctx, zones)
-	if err != nil {
-		log.Errorf("failed to list records while preparing UpdateRecords: %s", err)
-	}
-
-	return p.submitChanges(ctx, p.createUpdateChanges(updates, current, records, zones), zones)
+	return p.submitChanges(ctx, p.createUpdateChanges(updates, current), zones)
 }
 
-func (p *AWSProvider) createUpdateChanges(newEndpoints, oldEndpoints []*endpoint.Endpoint, recordsCache []*endpoint.Endpoint, zones map[string]*route53.HostedZone) []*route53.Change {
+func (p *AWSProvider) createUpdateChanges(newEndpoints, oldEndpoints []*endpoint.Endpoint) []*route53.Change {
 	var deletes []*endpoint.Endpoint
 	var creates []*endpoint.Endpoint
 	var updates []*endpoint.Endpoint
@@ -459,9 +453,9 @@ func (p *AWSProvider) createUpdateChanges(newEndpoints, oldEndpoints []*endpoint
 	}
 
 	combined := make([]*route53.Change, 0, len(deletes)+len(creates)+len(updates))
-	combined = append(combined, p.newChanges(route53.ChangeActionCreate, creates, recordsCache, zones)...)
-	combined = append(combined, p.newChanges(route53.ChangeActionUpsert, updates, recordsCache, zones)...)
-	combined = append(combined, p.newChanges(route53.ChangeActionDelete, deletes, recordsCache, zones)...)
+	combined = append(combined, p.newChanges(route53.ChangeActionCreate, creates)...)
+	combined = append(combined, p.newChanges(route53.ChangeActionUpsert, updates)...)
+	combined = append(combined, p.newChanges(route53.ChangeActionDelete, deletes)...)
 	return combined
 }
 
@@ -487,20 +481,11 @@ func (p *AWSProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) e
 		return errors.Wrap(err, "failed to list zones, not applying changes")
 	}
 
-	records, ok := ctx.Value(provider.RecordsContextKey).([]*endpoint.Endpoint)
-	if !ok {
-		var err error
-		records, err = p.records(ctx, zones)
-		if err != nil {
-			log.Errorf("failed to get records while preparing to applying changes: %s", err)
-		}
-	}
-
-	updateChanges := p.createUpdateChanges(changes.UpdateNew, changes.UpdateOld, records, zones)
+	updateChanges := p.createUpdateChanges(changes.UpdateNew, changes.UpdateOld)
 
 	combinedChanges := make([]*route53.Change, 0, len(changes.Delete)+len(changes.Create)+len(updateChanges))
-	combinedChanges = append(combinedChanges, p.newChanges(route53.ChangeActionCreate, changes.Create, records, zones)...)
-	combinedChanges = append(combinedChanges, p.newChanges(route53.ChangeActionDelete, changes.Delete, records, zones)...)
+	combinedChanges = append(combinedChanges, p.newChanges(route53.ChangeActionCreate, changes.Create)...)
+	combinedChanges = append(combinedChanges, p.newChanges(route53.ChangeActionDelete, changes.Delete)...)
 	combinedChanges = append(combinedChanges, updateChanges...)
 
 	return p.submitChanges(ctx, combinedChanges, zones)
@@ -567,11 +552,11 @@ func (p *AWSProvider) submitChanges(ctx context.Context, changes []*route53.Chan
 }
 
 // newChanges returns a collection of Changes based on the given records and action.
-func (p *AWSProvider) newChanges(action string, endpoints []*endpoint.Endpoint, recordsCache []*endpoint.Endpoint, zones map[string]*route53.HostedZone) []*route53.Change {
+func (p *AWSProvider) newChanges(action string, endpoints []*endpoint.Endpoint) []*route53.Change {
 	changes := make([]*route53.Change, 0, len(endpoints))
 
 	for _, endpoint := range endpoints {
-		change, dualstack := p.newChange(action, endpoint, recordsCache, zones)
+		change, dualstack := p.newChange(action, endpoint)
 		changes = append(changes, change)
 		if dualstack {
 			// make a copy of change, modify RRS type to AAAA, then add new change
@@ -619,7 +604,7 @@ func (p *AWSProvider) AdjustEndpoints(endpoints []*endpoint.Endpoint) []*endpoin
 // returned Change is based on the given record by the given action, e.g.
 // action=ChangeActionCreate returns a change for creation of the record and
 // action=ChangeActionDelete returns a change for deletion of the record.
-func (p *AWSProvider) newChange(action string, ep *endpoint.Endpoint, recordsCache []*endpoint.Endpoint, zones map[string]*route53.HostedZone) (*route53.Change, bool) {
+func (p *AWSProvider) newChange(action string, ep *endpoint.Endpoint) (*route53.Change, bool) {
 	change := &route53.Change{
 		Action: aws.String(action),
 		ResourceRecordSet: &route53.ResourceRecordSet{
@@ -908,8 +893,5 @@ func canonicalHostedZone(hostname string) string {
 
 // cleanZoneID removes the "/hostedzone/" prefix
 func cleanZoneID(id string) string {
-	if strings.HasPrefix(id, "/hostedzone/") {
-		id = strings.TrimPrefix(id, "/hostedzone/")
-	}
-	return id
+	return strings.TrimPrefix(id, "/hostedzone/")
 }

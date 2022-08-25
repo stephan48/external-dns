@@ -19,9 +19,12 @@ package controller
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"sigs.k8s.io/external-dns/endpoint"
 	"sigs.k8s.io/external-dns/internal/testutils"
@@ -49,6 +52,10 @@ type filteredMockProvider struct {
 	ApplyChangesCalls []*plan.Changes
 }
 
+type errorMockProvider struct {
+	mockProvider
+}
+
 func (p *filteredMockProvider) GetDomainFilter() endpoint.DomainFilterInterface {
 	return p.domainFilter
 }
@@ -68,6 +75,10 @@ func (p *filteredMockProvider) ApplyChanges(ctx context.Context, changes *plan.C
 // Records returns the desired mock endpoints.
 func (p *mockProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, error) {
 	return p.RecordsStore, nil
+}
+
+func (p *errorMockProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, error) {
+	return nil, errors.New("error for testing")
 }
 
 // ApplyChanges validates that the passed in changes satisfy the assumptions.
@@ -180,6 +191,13 @@ func TestRunOnce(t *testing.T) {
 
 	// Validate that the mock source was called.
 	source.AssertExpectations(t)
+	// check the verified records
+	assert.Equal(t, math.Float64bits(1), valueFromMetric(verifiedARecords))
+}
+
+func valueFromMetric(metric prometheus.Gauge) uint64 {
+	ref := reflect.ValueOf(metric)
+	return reflect.Indirect(ref).FieldByName("valBits").Uint()
 }
 
 func TestShouldRunOnce(t *testing.T) {
@@ -219,6 +237,17 @@ func TestShouldRunOnce(t *testing.T) {
 
 	// But not two times
 	assert.False(t, ctrl.ShouldRunOnce(now))
+
+	// Multiple ingresses or services changes, closer than MinInterval from each other
+	firstChangeTime := now
+	secondChangeTime := firstChangeTime.Add(time.Second)
+	// First change
+	ctrl.ScheduleRunOnce(firstChangeTime)
+	// Second change
+	ctrl.ScheduleRunOnce(secondChangeTime)
+	// Should not postpone the reconciliation further than firstChangeTime + MinInterval
+	now = now.Add(ctrl.MinEventSyncInterval)
+	assert.True(t, ctrl.ShouldRunOnce(now))
 }
 
 func testControllerFiltersDomains(t *testing.T, configuredEndpoints []*endpoint.Endpoint, domainFilter endpoint.DomainFilterInterface, providerEndpoints []*endpoint.Endpoint, expectedChanges []*plan.Changes) {
@@ -236,6 +265,51 @@ func testControllerFiltersDomains(t *testing.T, configuredEndpoints []*endpoint.
 	r, err := registry.NewNoopRegistry(provider)
 
 	require.NoError(t, err)
+
+	ctrl := &Controller{
+		Source:             source,
+		Registry:           r,
+		Policy:             &plan.SyncPolicy{},
+		DomainFilter:       domainFilter,
+		ManagedRecordTypes: cfg.ManagedDNSRecordTypes,
+	}
+
+	assert.NoError(t, ctrl.RunOnce(context.Background()))
+	assert.Equal(t, 1, provider.RecordsCallCount)
+	require.Len(t, provider.ApplyChangesCalls, len(expectedChanges))
+	for i, change := range expectedChanges {
+		assert.Equal(t, *change, *provider.ApplyChangesCalls[i])
+	}
+}
+
+type noopRegistryWithMissing struct {
+	*registry.NoopRegistry
+	missingRecords []*endpoint.Endpoint
+}
+
+func (r *noopRegistryWithMissing) MissingRecords() []*endpoint.Endpoint {
+	return r.missingRecords
+}
+
+func testControllerFiltersDomainsWithMissing(t *testing.T, configuredEndpoints []*endpoint.Endpoint, domainFilter endpoint.DomainFilterInterface, providerEndpoints, missingEndpoints []*endpoint.Endpoint, expectedChanges []*plan.Changes) {
+	t.Helper()
+	cfg := externaldns.NewConfig()
+	cfg.ManagedDNSRecordTypes = []string{endpoint.RecordTypeA, endpoint.RecordTypeCNAME}
+
+	source := new(testutils.MockSource)
+	source.On("Endpoints").Return(configuredEndpoints, nil)
+
+	// Fake some existing records in our DNS provider and validate some desired changes.
+	provider := &filteredMockProvider{
+		RecordsStore: providerEndpoints,
+	}
+	noop, err := registry.NewNoopRegistry(provider)
+	require.NoError(t, err)
+
+	r := &noopRegistryWithMissing{
+		NoopRegistry:   noop,
+		missingRecords: missingEndpoints,
+	}
 
 	ctrl := &Controller{
 		Source:             source,
@@ -375,4 +449,182 @@ func TestWhenMultipleControllerConsidersAllFilteredComain(t *testing.T) {
 			},
 		},
 	)
+}
+
+func TestVerifyARecords(t *testing.T) {
+	testControllerFiltersDomains(
+		t,
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "create-record.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.2.3.4"},
+			},
+			{
+				DNSName:    "some-record.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"8.8.8.8"},
+			},
+		},
+		endpoint.NewDomainFilter([]string{"used.tld"}),
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "some-record.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"8.8.8.8"},
+			},
+			{
+				DNSName:    "create-record.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.2.3.4"},
+			},
+		},
+		[]*plan.Changes{},
+	)
+	assert.Equal(t, math.Float64bits(2), valueFromMetric(verifiedARecords))
+
+	testControllerFiltersDomains(
+		t,
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "some-record.1.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.2.3.4"},
+			},
+			{
+				DNSName:    "some-record.2.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"8.8.8.8"},
+			},
+			{
+				DNSName:    "some-record.3.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"24.24.24.24"},
+			},
+		},
+		endpoint.NewDomainFilter([]string{"used.tld"}),
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "some-record.1.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.2.3.4"},
+			},
+			{
+				DNSName:    "some-record.2.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"8.8.8.8"},
+			},
+		},
+		[]*plan.Changes{{
+			Create: []*endpoint.Endpoint{
+				{
+					DNSName:    "some-record.3.used.tld",
+					RecordType: endpoint.RecordTypeA,
+					Targets:    endpoint.Targets{"24.24.24.24"},
+				},
+			},
+		}},
+	)
+	assert.Equal(t, math.Float64bits(2), valueFromMetric(verifiedARecords))
+}
+
+func TestARecords(t *testing.T) {
+	testControllerFiltersDomains(
+		t,
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "record1.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.2.3.4"},
+			},
+			{
+				DNSName:    "record2.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"8.8.8.8"},
+			},
+			{
+				DNSName:    "_mysql-svc._tcp.mysql.used.tld",
+				RecordType: endpoint.RecordTypeSRV,
+				Targets:    endpoint.Targets{"0 50 30007 mysql.used.tld"},
+			},
+		},
+		endpoint.NewDomainFilter([]string{"used.tld"}),
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "record1.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.2.3.4"},
+			},
+			{
+				DNSName:    "_mysql-svc._tcp.mysql.used.tld",
+				RecordType: endpoint.RecordTypeSRV,
+				Targets:    endpoint.Targets{"0 50 30007 mysql.used.tld"},
+			},
+		},
+		[]*plan.Changes{{
+			Create: []*endpoint.Endpoint{
+				{
+					DNSName:    "record2.used.tld",
+					RecordType: endpoint.RecordTypeA,
+					Targets:    endpoint.Targets{"8.8.8.8"},
+				},
+			},
+		}},
+	)
+	assert.Equal(t, math.Float64bits(2), valueFromMetric(sourceARecords))
+	assert.Equal(t, math.Float64bits(1), valueFromMetric(registryARecords))
+}
+
+// TestMissingRecordsApply validates that the missing records result in the dedicated plan apply.
+func TestMissingRecordsApply(t *testing.T) {
+	testControllerFiltersDomainsWithMissing(
+		t,
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "record1.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.2.3.4"},
+			},
+			{
+				DNSName:    "record2.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"8.8.8.8"},
+			},
+		},
+		endpoint.NewDomainFilter([]string{"used.tld"}),
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "record1.used.tld",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.2.3.4"},
+			},
+		},
+		[]*endpoint.Endpoint{
+			{
+				DNSName:    "a-record1.used.tld",
+				RecordType: endpoint.RecordTypeTXT,
+				Targets:    endpoint.Targets{"\"heritage=external-dns,external-dns/owner=owner\""},
+			},
+		},
+		[]*plan.Changes{
+			// Missing record had its own plan applied.
+			{
+				Create: []*endpoint.Endpoint{
+					{
+						DNSName:    "a-record1.used.tld",
+						RecordType: endpoint.RecordTypeTXT,
+						Targets:    endpoint.Targets{"\"heritage=external-dns,external-dns/owner=owner\""},
+					},
+				},
+			},
+			{
+				Create: []*endpoint.Endpoint{
+					{
+						DNSName:    "record2.used.tld",
+						RecordType: endpoint.RecordTypeA,
+						Targets:    endpoint.Targets{"8.8.8.8"},
+					},
+				},
+			},
+		})
 }

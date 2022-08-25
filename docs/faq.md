@@ -34,7 +34,7 @@ As stated in the README, we are currently looking for stable maintainers for tho
 
 ### Which Kubernetes objects are supported?
 
-Services exposed via `type=LoadBalancer`, `type=ExternalName` and for the hostnames defined in Ingress objects as well as headless hostPort services. An initial effort to support type `NodePort` was started as of May 2018 and it is in progress at the time of writing.
+Services exposed via `type=LoadBalancer`, `type=ExternalName`, `type=NodePort`, and for the hostnames defined in Ingress objects as well as [headless hostPort](tutorials/hostport.md) services.
 
 ### How do I specify a DNS name for my Kubernetes objects?
 
@@ -88,7 +88,7 @@ ExternalDNS will allow you to opt into any Services and Ingresses that you want 
 
 ### I'm afraid you will mess up my DNS records!
 
-ExternalDNS since v0.3 implements the concept of owning DNS records. This means that ExternalDNS will keep track of which records it has control over, and will never modify any records over which it doesn't have control. This is a fundamental requirement to operate ExternalDNS safely when there might be other actors creating DNS records in the same target space.
+Since v0.3, ExternalDNS can be configured to use an ownership registry. When this option is enabled, ExternalDNS will keep track of which records it has control over, and will never modify any records over which it doesn't have control. This is a fundamental requirement to operate ExternalDNS safely when there might be other actors creating DNS records in the same target space.
 
 For now ExternalDNS uses TXT records to label owned records, and there might be other alternatives coming in the future releases.
 
@@ -185,6 +185,10 @@ Here is the full list of available metrics provided by ExternalDNS:
 | external_dns_registry_errors_total                  | Number of Registry errors                               | Counter |
 | external_dns_source_endpoints_total                 | Number of Endpoints in the registry                     | Gauge   |
 | external_dns_source_errors_total                    | Number of Source errors                                 | Counter |
+| external_dns_controller_verified_records            | Number of DNS A-records that exists both in             | Gauge   |
+|                                                     | source & registry                                       |         |
+| external_dns_registry_a_records                     | Number of A records in registry                         | Gauge   |
+| external_dns_source_a_records                       | Number of A records in source                           | Gauge   |
 
 ### How can I run ExternalDNS under a specific GCP Service Account, e.g. to access DNS records in other projects?
 
@@ -255,7 +259,7 @@ The internal one should provision hostnames used on the internal network (perhap
 one to expose DNS to the internet.
 
 To do this with ExternalDNS you can use the `--annotation-filter` to specifically tie an instance of ExternalDNS to
-an instance of a ingress controller. Let's assume you have two ingress controllers `nginx-internal` and `nginx-external`
+an instance of an ingress controller. Let's assume you have two ingress controllers `nginx-internal` and `nginx-external`
 then you can start two ExternalDNS providers one with `--annotation-filter=kubernetes.io/ingress.class in (nginx-internal)`
 and one with `--annotation-filter=kubernetes.io/ingress.class in (nginx-external)`.
 
@@ -264,6 +268,11 @@ If you need to search for multiple values of said annotation, you can provide a 
 
 Beware when using multiple sources, e.g. `--source=service --source=ingress`, `--annotation-filter` will filter every given source objects.
 If you need to filter only one specific source you have to run a separated external dns service containing only the wanted `--source`  and `--annotation-filter`.
+
+**Note:** Filtering based on annotation means that the external-dns controller will receive all resources of that kind and then filter on the client-side.
+In larger clusters with many resources which change frequently this can cause performance issues. If only some resources need to be managed by an instance
+of external-dns then label filtering can be used instead of annotation filtering. This means that only those resources which match the selector specified
+in `--label-filter` will be passed to the controller.
 
 ### How do I specify that I want the DNS record to point to either the Node's public or private IP when it has both?
 
@@ -274,6 +283,9 @@ To accomplish this, set this annotation on your service: `external-dns.alpha.kub
 Conversely, to force the public IP: `external-dns.alpha.kubernetes.io/access=public`
 
 If this annotation is not set, and the node has both public and private IP addresses, then the public IP will be used by default.
+
+Some loadbalancer implementations assign multiple IP addresses as external addresses. You can filter the generated targets by their networks
+using `--target-net-filter=10.0.0.0/8` or `--exclude-target-net=10.0.0.0/8`.
 
 ### Can external-dns manage(add/remove) records in a hosted zone which is setup in different AWS account?
 

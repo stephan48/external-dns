@@ -27,9 +27,9 @@ import (
 	extInformers "github.com/openshift/client-go/route/informers/externalversions"
 	routeInformer "github.com/openshift/client-go/route/informers/externalversions/route/v1"
 	log "github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 
 	"sigs.k8s.io/external-dns/endpoint"
@@ -48,16 +48,21 @@ type ocpRouteSource struct {
 	combineFQDNAnnotation    bool
 	ignoreHostnameAnnotation bool
 	routeInformer            routeInformer.RouteInformer
+	labelSelector            labels.Selector
+	ocpRouterName            string
 }
 
 // NewOcpRouteSource creates a new ocpRouteSource with the given config.
 func NewOcpRouteSource(
+	ctx context.Context,
 	ocpClient versioned.Interface,
 	namespace string,
 	annotationFilter string,
 	fqdnTemplate string,
 	combineFQDNAnnotation bool,
 	ignoreHostnameAnnotation bool,
+	labelSelector labels.Selector,
+	ocpRouterName string,
 ) (Source, error) {
 	tmpl, err := parseTemplate(fqdnTemplate)
 	if err != nil {
@@ -66,19 +71,18 @@ func NewOcpRouteSource(
 
 	// Use a shared informer to listen for add/update/delete of Routes in the specified namespace.
 	// Set resync period to 0, to prevent processing when nothing has changed.
-	informerFactory := extInformers.NewFilteredSharedInformerFactory(ocpClient, 0, namespace, nil)
-	routeInformer := informerFactory.Route().V1().Routes()
+	informerFactory := extInformers.NewSharedInformerFactoryWithOptions(ocpClient, 0, extInformers.WithNamespace(namespace))
+	informer := informerFactory.Route().V1().Routes()
 
 	// Add default resource event handlers to properly initialize informer.
-	routeInformer.Informer().AddEventHandler(
+	informer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 			},
 		},
 	)
 
-	// TODO informer is not explicitly stopped since controller is not passing in its channel.
-	informerFactory.Start(wait.NeverStop)
+	informerFactory.Start(ctx.Done())
 
 	// wait for the local cache to be populated.
 	if err := waitForCacheSync(context.Background(), informerFactory); err != nil {
@@ -92,19 +96,25 @@ func NewOcpRouteSource(
 		fqdnTemplate:             tmpl,
 		combineFQDNAnnotation:    combineFQDNAnnotation,
 		ignoreHostnameAnnotation: ignoreHostnameAnnotation,
-		routeInformer:            routeInformer,
+		routeInformer:            informer,
+		labelSelector:            labelSelector,
+		ocpRouterName:            ocpRouterName,
 	}, nil
 }
 
-// TODO add a meaningful EventHandler
 func (ors *ocpRouteSource) AddEventHandler(ctx context.Context, handler func()) {
+	log.Debug("Adding event handler for openshift route")
+
+	// Right now there is no way to remove event handler from informer, see:
+	// https://github.com/kubernetes/kubernetes/issues/79610
+	ors.routeInformer.Informer().AddEventHandler(eventHandlerFunc(handler))
 }
 
 // Endpoints returns endpoint objects for each host-target combination that should be processed.
 // Retrieves all OpenShift Route resources on all namespaces, unless an explicit namespace
 // is specified in ocpRouteSource.
 func (ors *ocpRouteSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error) {
-	ocpRoutes, err := ors.routeInformer.Lister().Routes(ors.namespace).List(labels.Everything())
+	ocpRoutes, err := ors.routeInformer.Lister().Routes(ors.namespace).List(ors.labelSelector)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +135,7 @@ func (ors *ocpRouteSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint,
 			continue
 		}
 
-		orEndpoints := endpointsFromOcpRoute(ocpRoute, ors.ignoreHostnameAnnotation)
+		orEndpoints := ors.endpointsFromOcpRoute(ocpRoute, ors.ignoreHostnameAnnotation)
 
 		// apply template if host is missing on OpenShift Route
 		if (ors.combineFQDNAnnotation || len(orEndpoints) == 0) && ors.fqdnTemplate != nil {
@@ -171,7 +181,8 @@ func (ors *ocpRouteSource) endpointsFromTemplate(ocpRoute *routev1.Route) ([]*en
 
 	targets := getTargetsFromTargetAnnotation(ocpRoute.Annotations)
 	if len(targets) == 0 {
-		targets = targetsFromOcpRouteStatus(ocpRoute.Status)
+		targetsFromRoute, _ := ors.getTargetsFromRouteStatus(ocpRoute.Status)
+		targets = targetsFromRoute
 	}
 
 	providerSpecific, setIdentifier := getProviderSpecificAnnotations(ocpRoute.Annotations)
@@ -220,7 +231,7 @@ func (ors *ocpRouteSource) setResourceLabel(ocpRoute *routev1.Route, endpoints [
 }
 
 // endpointsFromOcpRoute extracts the endpoints from a OpenShift Route object
-func endpointsFromOcpRoute(ocpRoute *routev1.Route, ignoreHostnameAnnotation bool) []*endpoint.Endpoint {
+func (ors *ocpRouteSource) endpointsFromOcpRoute(ocpRoute *routev1.Route, ignoreHostnameAnnotation bool) []*endpoint.Endpoint {
 	var endpoints []*endpoint.Endpoint
 
 	ttl, err := getTTLFromAnnotations(ocpRoute.Annotations)
@@ -229,14 +240,15 @@ func endpointsFromOcpRoute(ocpRoute *routev1.Route, ignoreHostnameAnnotation boo
 	}
 
 	targets := getTargetsFromTargetAnnotation(ocpRoute.Annotations)
+	targetsFromRoute, host := ors.getTargetsFromRouteStatus(ocpRoute.Status)
 
 	if len(targets) == 0 {
-		targets = targetsFromOcpRouteStatus(ocpRoute.Status)
+		targets = targetsFromRoute
 	}
 
 	providerSpecific, setIdentifier := getProviderSpecificAnnotations(ocpRoute.Annotations)
 
-	if host := ocpRoute.Spec.Host; host != "" {
+	if host != "" {
 		endpoints = append(endpoints, endpointsForHostname(host, targets, ttl, providerSpecific, setIdentifier)...)
 	}
 
@@ -250,14 +262,35 @@ func endpointsFromOcpRoute(ocpRoute *routev1.Route, ignoreHostnameAnnotation boo
 	return endpoints
 }
 
-func targetsFromOcpRouteStatus(status routev1.RouteStatus) endpoint.Targets {
-	var targets endpoint.Targets
-
+// getTargetsFromRouteStatus returns the router's canonical hostname and host
+// either for the given router if it admitted the route
+// or for the first (in the status list) router that admitted the route.
+func (ors *ocpRouteSource) getTargetsFromRouteStatus(status routev1.RouteStatus) (endpoint.Targets, string) {
 	for _, ing := range status.Ingress {
-		if ing.RouterCanonicalHostname != "" {
-			targets = append(targets, ing.RouterCanonicalHostname)
+		// if this Ingress didn't admit the route or it doesn't have the canonical hostname, then ignore it
+		if ingressConditionStatus(&ing, routev1.RouteAdmitted) != corev1.ConditionTrue || ing.RouterCanonicalHostname == "" {
+			continue
+		}
+
+		// if the router name is specified for the Route source and it matches the route's ingress name, then return it
+		if ors.ocpRouterName != "" && ors.ocpRouterName == ing.RouterName {
+			return endpoint.Targets{ing.RouterCanonicalHostname}, ing.Host
+		}
+
+		// if the router name is not specified in the Route source then return the first ingress
+		if ors.ocpRouterName == "" {
+			return endpoint.Targets{ing.RouterCanonicalHostname}, ing.Host
 		}
 	}
+	return endpoint.Targets{}, ""
+}
 
-	return targets
+func ingressConditionStatus(ingress *routev1.RouteIngress, t routev1.RouteIngressConditionType) corev1.ConditionStatus {
+	for _, condition := range ingress.Conditions {
+		if t != condition.Type {
+			continue
+		}
+		return condition.Status
+	}
+	return corev1.ConditionUnknown
 }

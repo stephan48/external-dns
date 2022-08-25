@@ -4,11 +4,14 @@
 approvers:
   - raffo
   - njuettner
+  - seanmalloy
+  - szuecs
 
 reviewers:
   - njuettner
   - raffo
   - seanmalloy
+  - szuecs
 
 emeritus_approvers:
   - hjacobs
