@@ -447,9 +447,9 @@ func (suite *PlanTestSuite) TestIdempotency() {
 func (suite *PlanTestSuite) TestDifferentTypes() {
 	current := []*endpoint.Endpoint{suite.fooV1Cname}
 	desired := []*endpoint.Endpoint{suite.fooV2Cname, suite.fooA5}
-	expectedCreate := []*endpoint.Endpoint{}
+	expectedCreate := []*endpoint.Endpoint{suite.fooA5}
 	expectedUpdateOld := []*endpoint.Endpoint{suite.fooV1Cname}
-	expectedUpdateNew := []*endpoint.Endpoint{suite.fooA5}
+	expectedUpdateNew := []*endpoint.Endpoint{suite.fooV2Cname}
 	expectedDelete := []*endpoint.Endpoint{}
 
 	p := &Plan{
