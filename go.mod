@@ -16,11 +16,11 @@ require (
 	github.com/alecthomas/assert v0.0.0-20170929043011-405dbfeb8e38 // indirect
 	github.com/alecthomas/colour v0.1.0 // indirect
 	github.com/alecthomas/kingpin v2.2.5+incompatible
-	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1483
+	github.com/aliyun/alibaba-cloud-sdk-go v1.61.1742
 	github.com/ans-group/sdk-go v1.8.1
 	github.com/aws/aws-sdk-go v1.44.81
 	github.com/bodgit/tsig v1.2.0
-	github.com/cloudflare/cloudflare-go v0.25.0
+	github.com/cloudflare/cloudflare-go v0.50.0
 	github.com/cloudfoundry-community/go-cfclient v0.0.0-20190201205600-f136f9222381
 	github.com/datawire/ambassador v1.6.0
 	github.com/denverdino/aliyungo v0.0.0-20190125010748-a747050bb1ba
@@ -50,7 +50,7 @@ require (
 	github.com/prometheus/client_golang v1.12.2
 	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.7.0.20210127161313-bd30bebeac4f
 	github.com/sirupsen/logrus v1.9.0
-	github.com/stretchr/testify v1.7.0
+	github.com/stretchr/testify v1.8.0
 	github.com/transip/gotransip/v6 v6.17.0
 	github.com/ultradns/ultradns-sdk-go v0.0.0-20200616202852-e62052662f60
 	github.com/vinyldns/go-vinyldns v0.0.0-20200211145900-fe8a3d82e556
@@ -58,9 +58,9 @@ require (
 	go.etcd.io/etcd/api/v3 v3.5.4
 	go.etcd.io/etcd/client/v3 v3.5.2
 	go.uber.org/ratelimit v0.2.0
-	golang.org/x/net v0.0.0-20220624214902-1bab6f366d9e
+	golang.org/x/net v0.0.0-20220722155237-a158d28d115b
 	golang.org/x/oauth2 v0.0.0-20220622183110-fd043fe589d2
-	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
+	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
 	google.golang.org/api v0.93.0
 	gopkg.in/ns1/ns1-go.v2 v2.0.0-20190322154155-0dafb5275fd1
 	gopkg.in/yaml.v2 v2.4.0
@@ -141,7 +141,10 @@ require (
 	github.com/smartystreets/go-aws-auth v0.0.0-20180515143844-0c1422d1fdb9 // indirect
 	github.com/smartystreets/gunit v1.3.4 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/objx v0.3.0 // indirect
+	github.com/stretchr/objx v0.4.0 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.344
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.344
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/privatedns v1.0.344
 	github.com/terra-farm/udnssdk v1.3.5 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.2 // indirect
 	go.mongodb.org/mongo-driver v1.5.1 // indirect
@@ -150,13 +153,12 @@ require (
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.19.1 // indirect
 	golang.org/x/crypto v0.0.0-20220427172511-eb4f295cb31f // indirect
-	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3 // indirect
-	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
+	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 // indirect
+	golang.org/x/sys v0.0.0-20220829200755-d48e67d00261 // indirect
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
-	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
-	golang.org/x/tools v0.1.10 // indirect
-	golang.org/x/xerrors v0.0.0-20220609144429-65e65417b02f // indirect
+	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65 // indirect
+	golang.org/x/tools v0.1.12 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20220804142021-4e6b2dfa6612 // indirect
 	google.golang.org/grpc v1.48.0 // indirect
@@ -178,9 +180,12 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
+require github.com/pluralsh/gqlclient v1.1.6
+
 require (
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
+	github.com/Yamashou/gqlgenc v0.11.0 // indirect
 	github.com/emicklei/go-restful v2.9.5+incompatible // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/go-openapi/jsonreference v0.19.5 // indirect
@@ -189,7 +194,12 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
+	github.com/mattn/go-runewidth v0.0.13 // indirect
+	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/rivo/uniseg v0.2.0 // indirect
+	github.com/schollz/progressbar/v3 v3.8.6 // indirect
+	github.com/vektah/gqlparser/v2 v2.5.0 // indirect
 )
 
 replace k8s.io/klog/v2 => github.com/Raffo/knolog v0.0.0-20211016155154-e4d5e0cc970a
