@@ -665,7 +665,7 @@ func (suite *PlanTestSuite) TestDomainFiltersUpdate() {
 	validateEntries(suite.T(), changes.Delete, expectedDelete)
 }
 
-func (suite *PlanTestSuite) TestAAAARecords() {
+func (suite *PlanTestSuite) TestAAAARecords1() {
 
 	current := []*endpoint.Endpoint{}
 	desired := []*endpoint.Endpoint{suite.fooAAAA}
@@ -683,6 +683,39 @@ func (suite *PlanTestSuite) TestAAAARecords() {
 }
 
 func (suite *PlanTestSuite) TestDualStackRecords() {
+	current := []*endpoint.Endpoint{}
+	desired := []*endpoint.Endpoint{suite.dsA, suite.dsAAAA}
+	expectedCreate := []*endpoint.Endpoint{suite.dsA, suite.dsAAAA}
+
+	p := &Plan{
+		Policies:       []Policy{&SyncPolicy{}},
+		Current:        current,
+		Desired:        desired,
+		ManagedRecords: []string{endpoint.RecordTypeA, endpoint.RecordTypeAAAA, endpoint.RecordTypeCNAME},
+	}
+
+	changes := p.Calculate().Changes
+	validateEntries(suite.T(), changes.Create, expectedCreate)
+}
+
+func (suite *PlanTestSuite) TestAAAARecords() {
+
+	current := []*endpoint.Endpoint{}
+	desired := []*endpoint.Endpoint{suite.fooAAAA}
+	expectedCreate := []*endpoint.Endpoint{suite.fooAAAA}
+
+	p := &Plan{
+		Policies:       []Policy{&SyncPolicy{}},
+		Current:        current,
+		Desired:        desired,
+		ManagedRecords: []string{endpoint.RecordTypeAAAA, endpoint.RecordTypeCNAME},
+	}
+
+	changes := p.Calculate().Changes
+	validateEntries(suite.T(), changes.Create, expectedCreate)
+}
+
+func (suite *PlanTestSuite) TestDualStackRecords2() {
 	current := []*endpoint.Endpoint{}
 	desired := []*endpoint.Endpoint{suite.dsA, suite.dsAAAA}
 	expectedCreate := []*endpoint.Endpoint{suite.dsA, suite.dsAAAA}
