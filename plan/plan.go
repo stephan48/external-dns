@@ -82,7 +82,7 @@ type planTable struct {
 	resolver ConflictResolver
 }
 
-func newPlanTable() planTable { //TODO: make resolver configurable
+func newPlanTable() planTable { // TODO: make resolver configurable
 	return planTable{map[string]map[string]map[string]*planTableRow{}, PerResource{}}
 }
 
@@ -155,7 +155,7 @@ func (p *Plan) Calculate() *Plan {
 	for _, topRow := range t.rows {
 		for _, midRow := range topRow {
 			for _, row := range midRow {
-				if row.current == nil { //dns name not taken
+				if row.current == nil { // dns name not taken
 					changes.Create = append(changes.Create, t.resolver.ResolveCreate(row.candidates))
 				}
 				if row.current != nil && len(row.candidates) == 0 {
@@ -163,7 +163,7 @@ func (p *Plan) Calculate() *Plan {
 				}
 
 				// TODO: allows record type change, which might not be supported by all dns providers
-				if row.current != nil && len(row.candidates) > 0 { //dns name is taken
+				if row.current != nil && len(row.candidates) > 0 { // dns name is taken
 					update := t.resolver.ResolveUpdate(row.current, row.candidates)
 					// compare "update" to "current" to figure out if actual update is required
 					if shouldUpdateTTL(update, row.current) || targetChanged(update, row.current) || p.shouldUpdateProviderSpecific(update, row.current) {

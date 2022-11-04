@@ -253,7 +253,7 @@ func (suite *PlanTestSuite) SetupTest() {
 func (suite *PlanTestSuite) TestSyncFirstRound() {
 	current := []*endpoint.Endpoint{}
 	desired := []*endpoint.Endpoint{suite.fooV1Cname, suite.fooV2Cname, suite.bar127A}
-	expectedCreate := []*endpoint.Endpoint{suite.fooV1Cname, suite.bar127A} //v1 is chosen because of resolver taking "min"
+	expectedCreate := []*endpoint.Endpoint{suite.fooV1Cname, suite.bar127A} // v1 is chosen because of resolver taking "min"
 	expectedUpdateOld := []*endpoint.Endpoint{}
 	expectedUpdateNew := []*endpoint.Endpoint{}
 	expectedDelete := []*endpoint.Endpoint{}
@@ -572,7 +572,6 @@ func (suite *PlanTestSuite) TestRemoveEndpointWithUpsert() {
 }
 
 func (suite *PlanTestSuite) TestMultipleRecordsSameNameDifferentSetIdentifier() {
-
 	current := []*endpoint.Endpoint{suite.multiple1}
 	desired := []*endpoint.Endpoint{suite.multiple2, suite.multiple3}
 	expectedCreate := []*endpoint.Endpoint{suite.multiple3}
@@ -595,7 +594,6 @@ func (suite *PlanTestSuite) TestMultipleRecordsSameNameDifferentSetIdentifier() 
 }
 
 func (suite *PlanTestSuite) TestSetIdentifierUpdateCreatesAndDeletes() {
-
 	current := []*endpoint.Endpoint{suite.multiple2}
 	desired := []*endpoint.Endpoint{suite.multiple3}
 	expectedCreate := []*endpoint.Endpoint{suite.multiple3}
@@ -618,7 +616,6 @@ func (suite *PlanTestSuite) TestSetIdentifierUpdateCreatesAndDeletes() {
 }
 
 func (suite *PlanTestSuite) TestDomainFiltersInitial() {
-
 	current := []*endpoint.Endpoint{suite.domainFilterExcluded}
 	desired := []*endpoint.Endpoint{suite.domainFilterExcluded, suite.domainFilterFiltered1, suite.domainFilterFiltered2, suite.domainFilterFiltered3}
 	expectedCreate := []*endpoint.Endpoint{suite.domainFilterFiltered1, suite.domainFilterFiltered2, suite.domainFilterFiltered3}
@@ -642,7 +639,6 @@ func (suite *PlanTestSuite) TestDomainFiltersInitial() {
 }
 
 func (suite *PlanTestSuite) TestDomainFiltersUpdate() {
-
 	current := []*endpoint.Endpoint{suite.domainFilterExcluded, suite.domainFilterFiltered1, suite.domainFilterFiltered2}
 	desired := []*endpoint.Endpoint{suite.domainFilterExcluded, suite.domainFilterFiltered1, suite.domainFilterFiltered2, suite.domainFilterFiltered3}
 	expectedCreate := []*endpoint.Endpoint{suite.domainFilterFiltered3}
@@ -665,33 +661,15 @@ func (suite *PlanTestSuite) TestDomainFiltersUpdate() {
 	validateEntries(suite.T(), changes.Delete, expectedDelete)
 }
 
-func (suite *PlanTestSuite) TestAAAARecords1() {
-
-	current := []*endpoint.Endpoint{}
-	desired := []*endpoint.Endpoint{suite.fooAAAA}
-	expectedCreate := []*endpoint.Endpoint{suite.fooAAAA}
+func (suite *PlanTestSuite) TestMissing() {
+	missing := []*endpoint.Endpoint{suite.domainFilterFilteredTXT1, suite.domainFilterFilteredTXT2, suite.domainFilterExcludedTXT}
+	expectedCreate := []*endpoint.Endpoint{suite.domainFilterFilteredTXT1, suite.domainFilterFilteredTXT2}
 
 	p := &Plan{
 		Policies:       []Policy{&SyncPolicy{}},
-		Current:        current,
-		Desired:        desired,
-		ManagedRecords: []string{endpoint.RecordTypeAAAA, endpoint.RecordTypeCNAME},
-	}
-
-	changes := p.Calculate().Changes
-	validateEntries(suite.T(), changes.Create, expectedCreate)
-}
-
-func (suite *PlanTestSuite) TestDualStackRecords() {
-	current := []*endpoint.Endpoint{}
-	desired := []*endpoint.Endpoint{suite.dsA, suite.dsAAAA}
-	expectedCreate := []*endpoint.Endpoint{suite.dsA, suite.dsAAAA}
-
-	p := &Plan{
-		Policies:       []Policy{&SyncPolicy{}},
-		Current:        current,
-		Desired:        desired,
-		ManagedRecords: []string{endpoint.RecordTypeA, endpoint.RecordTypeAAAA, endpoint.RecordTypeCNAME},
+		Missing:        missing,
+		DomainFilter:   endpoint.NewDomainFilter([]string{"domain.tld"}),
+		ManagedRecords: []string{endpoint.RecordTypeA, endpoint.RecordTypeCNAME},
 	}
 
 	changes := p.Calculate().Changes
@@ -715,7 +693,7 @@ func (suite *PlanTestSuite) TestAAAARecords() {
 	validateEntries(suite.T(), changes.Create, expectedCreate)
 }
 
-func (suite *PlanTestSuite) TestDualStackRecords2() {
+func (suite *PlanTestSuite) TestDualStackRecords() {
 	current := []*endpoint.Endpoint{}
 	desired := []*endpoint.Endpoint{suite.dsA, suite.dsAAAA}
 	expectedCreate := []*endpoint.Endpoint{suite.dsA, suite.dsAAAA}
@@ -923,7 +901,6 @@ func TestShouldUpdateProviderSpecific(tt *testing.T) {
 			}
 			b := plan.shouldUpdateProviderSpecific(test.desired, test.current)
 			assert.Equal(t, test.shouldUpdate, b)
-
 		})
 	}
 }
