@@ -1304,7 +1304,9 @@ func TestGenerateTXTForAAAA(t *testing.T) {
 			DNSName:    "aaaa-foo.test-zone.example.org",
 			Targets:    endpoint.Targets{"\"heritage=external-dns,external-dns/owner=owner\""},
 			RecordType: endpoint.RecordTypeTXT,
-			Labels:     map[string]string{},
+			Labels: map[string]string{
+				endpoint.OwnedRecordLabelKey: "foo.test-zone.example.org",
+			},
 		},
 	}
 	p := inmemory.NewInMemoryProvider()
